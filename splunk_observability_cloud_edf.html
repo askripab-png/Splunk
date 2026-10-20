@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-[#FAF6DE]">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Splunk Observability Cloud - EDF Graphs & Visual Metrics</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        splunk: {
+                            pink: '#E6007E',
+                            pinkDark: '#C2006A',
+                            orange: '#FF7900',
+                            green: '#00B159',
+                            blue: '#00A3E0',
+                            red: '#FF3B30',
+                            yellow: '#FFCC00',
+                            bgDark: '#12161F',
+                            panelBg: '#1C222D',
+                            cardBg: '#242C3A',
+                            panelBorder: '#2E384A',
+                            muted: '#94A3B8'
+                        },
+                        pastelYellow: '#FAF6DE'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #12161F; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+
+        .splunk-card {
+            background-color: #1C222D;
+            border: 1px solid #2E384A;
+            border-radius: 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .splunk-card:hover {
+            border-color: #404E67;
+            box-shadow: 0 12px 32px rgba(230, 0, 126, 0.12);
+        }
+
+        .chart-grid-line {
+            stroke: #2A3446;
+            stroke-dasharray: 4;
+        }
+
+        .pulse-pink {
+            animation: pulsePink 2s infinite;
+        }
+        @keyframes pulsePink {
+            0% { box-shadow: 0 0 0 0 rgba(230, 0, 126, 0.6); }
+            70% { box-shadow: 0 0 0 10px rgba(230, 0, 126, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(230, 0, 126, 0); }
+        }
+
+        .chart-path {
+            transition: d 0.6s ease-in-out, stroke 0.4s ease;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-100 font-sans flex flex-col bg-[#FAF6DE] p-2 sm:p-4">
+
+    <!-- MAIN APP WRAPPER WITH PASTEL YELLOW OUTER FRAME & DARK INNER DASHBOARD -->
+    <div class="flex-1 flex flex-col rounded-2xl border-2 border-amber-300/80 shadow-2xl bg-splunk-bgDark overflow-hidden min-h-[92vh]">
+
+        <!-- HEADER & TOOLBAR -->
+        <header class="bg-splunk-bgDark border-b border-splunk-panelBorder px-4 py-3 sticky top-0 z-40">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                
+                <!-- Brand & Environment Scope -->
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-splunk-pink flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-splunk-pink/30">
+                            &gt;
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="font-extrabold text-white text-lg tracking-tight font-sans">splunk<span class="text-splunk-pink">&gt;</span></span>
+                                <span class="bg-splunk-pink/20 text-splunk-pink border border-splunk-pink/40 text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider">Observability Cloud</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 font-mono">EDF SOC & SI OBSERVABILITY • GRAPH-ONLY VISUALIZER</p>
+                        </div>
+                    </div>
+
+                    <div class="hidden xl:block h-8 w-px bg-slate-800"></div>
+
+                    <!-- Environment Dropdown -->
+                    <div class="hidden lg:flex items-center gap-2 bg-splunk-panelBg border border-splunk-panelBorder px-3 py-1.5 rounded-xl">
+                        <i data-lucide="layers" class="w-4 h-4 text-splunk-pink"></i>
+                        <span class="text-xs text-slate-400 font-medium">Périmètre:</span>
+                        <select id="env-select" onchange="switchEnvironment(this.value)" class="bg-splunk-bgDark text-xs font-bold text-white border border-slate-700 rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer">
+                            <option value="nuclear">EDF CNPE Prod (Nucléaire)</option>
+                            <option value="grid">EDF Smart Grid & Telemetry OT</option>
+                            <option value="k8s" selected>EDF OpenShift Kubernetes Fleet</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Live Controls & Time Windows -->
+                <div class="flex items-center gap-3">
+                    
+                    <!-- Chaos Injection Toggle -->
+                    <button onclick="toggleChaosSpike()" id="btn-chaos" class="bg-splunk-panelBg hover:bg-slate-800 text-amber-400 border border-amber-500/40 font-mono font-bold text-xs px-3.5 py-2 rounded-xl transition-all flex items-center gap-2 shadow-lg">
+                        <i data-lucide="zap" class="w-4 h-4 text-amber-400 animate-bounce"></i>
+                        <span id="chaos-btn-text">Injecter Anomalie Réseau / Latence</span>
+                    </button>
+
+                    <!-- Realtime Ticker -->
+                    <div class="hidden sm:flex items-center gap-2 bg-splunk-panelBg border border-splunk-panelBorder px-3 py-2 rounded-xl font-mono text-xs text-slate-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-splunk-green animate-pulse"></span>
+                        <span id="live-timer" class="font-bold text-white">16:20:00</span>
+                    </div>
+
+                    <!-- Time Window Switcher -->
+                    <div class="flex items-center gap-1 bg-splunk-panelBg border border-splunk-panelBorder p-1 rounded-xl text-xs font-mono">
+                        <button onclick="setTimeRange('1h')" id="time-1h" class="px-3 py-1 rounded-lg bg-splunk-pink text-white font-bold">1h</button>
+                        <button onclick="setTimeRange('6h')" id="time-6h" class="px-3 py-1 rounded-lg text-slate-400 hover:text-white">6h</button>
+                        <button onclick="setTimeRange('24h')" id="time-24h" class="px-3 py-1 rounded-lg text-slate-400 hover:text-white">24h</button>
+                    </div>
+
+                </div>
+
+            </div>
+        </header>
+
+        <!-- DASHBOARD CONTENT AREA (GRAPH-ONLY LAYOUT) -->
+        <main class="flex-1 p-4 md:p-6 space-y-6 overflow-y-auto">
+
+            <!-- 1. TOP SPARKLINE METRIC CARDS -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <!-- Metric 1: Global Throughput -->
+                <div class="splunk-card p-4 space-y-2 border-l-4 border-l-splunk-pink">
+                    <div class="flex justify-between items-center text-xs text-slate-400 font-mono">
+                        <span>THROUGHPUT (RPS)</span>
+                        <i data-lucide="trending-up" class="w-4 h-4 text-splunk-pink"></i>
+                    </div>
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-3xl font-black font-mono text-white" id="card-rps-val">4,820</span>
+                        <span class="text-xs font-mono text-splunk-green font-bold">+12.4%</span>
+                    </div>
+                    <!-- Sparkline Curve -->
+                    <div class="h-10 w-full pt-1">
+                        <svg class="w-full h-full overflow-visible" viewBox="0 0 100 30" preserveAspectRatio="none">
+                            <path d="M0,25 Q15,10 30,20 T60,12 T90,22 T100,8" fill="none" stroke="#E6007E" stroke-width="2.5"/>
+                            <path d="M0,25 Q15,10 30,20 T60,12 T90,22 T100,8 L100,30 L0,30 Z" fill="rgba(230, 0, 126, 0.15)"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Metric 2: Latency P99 -->
+                <div class="splunk-card p-4 space-y-2 border-l-4 border-l-splunk-blue" id="card-latency-container">
+                    <div class="flex justify-between items-center text-xs text-slate-400 font-mono">
+                        <span>LATENCY P99 (ms)</span>
+                        <i data-lucide="clock" class="w-4 h-4 text-splunk-blue"></i>
+                    </div>
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-3xl font-black font-mono text-white" id="card-lat-val">38 ms</span>
+                        <span class="text-xs font-mono text-splunk-blue font-bold" id="card-lat-status">SLA OK (&lt;50ms)</span>
+                    </div>
+                    <!-- Sparkline Curve -->
+                    <div class="h-10 w-full pt-1">
+                        <svg class="w-full h-full overflow-visible" viewBox="0 0 100 30" preserveAspectRatio="none">
+                            <path id="spark-latency-path" d="M0,20 Q20,18 40,22 T80,19 T100,21" fill="none" stroke="#00A3E0" stroke-width="2.5"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Metric 3: Error Rate -->
+                <div class="splunk-card p-4 space-y-2 border-l-4 border-l-splunk-green" id="card-error-container">
+                    <div class="flex justify-between items-center text-xs text-slate-400 font-mono">
+                        <span>ERROR RATE (%)</span>
+                        <i data-lucide="alert-triangle" class="w-4 h-4 text-splunk-green" id="card-error-icon"></i>
+                    </div>
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-3xl font-black font-mono text-white" id="card-err-val">0.08%</span>
+                        <span class="text-xs font-mono text-slate-400" id="card-err-sub">0.08% / 100 req</span>
+                    </div>
+                    <!-- Bar Sparkline -->
+                    <div class="h-10 w-full flex items-end gap-1 pt-1" id="spark-error-bars">
+                        <div class="flex-1 bg-splunk-green/40 h-[20%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[15%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[30%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[10%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[25%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[18%] rounded-t"></div>
+                        <div class="flex-1 bg-splunk-green/40 h-[12%] rounded-t"></div>
+                    </div>
+                </div>
+
+                <!-- Metric 4: Apdex User Experience -->
+                <div class="splunk-card p-4 space-y-2 border-l-4 border-l-splunk-orange">
+                    <div class="flex justify-between items-center text-xs text-slate-400 font-mono">
+                        <span>APDEX SCORE</span>
+                        <i data-lucide="smile" class="w-4 h-4 text-splunk-orange"></i>
+                    </div>
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-3xl font-black font-mono text-white" id="card-apdex-val">0.97</span>
+                        <span class="text-xs font-mono text-splunk-green font-bold">Optimal</span>
+                    </div>
+                    <!-- Radial Arc Miniature -->
+                    <div class="h-10 w-full flex items-center justify-between">
+                        <span class="text-[10px] font-mono text-slate-400">0.0</span>
+                        <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden mx-2">
+                            <div id="bar-apdex" class="bg-splunk-orange h-full w-[97%] transition-all"></div>
+                        </div>
+                        <span class="text-[10px] font-mono text-slate-400">1.0</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 2. APM TIMELINE GRAPH (RPS VS LATENCY P99 AREA CHART) -->
+            <div class="splunk-card p-5 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
+                    <div>
+                        <h3 class="font-extrabold text-white text-base flex items-center gap-2 font-mono">
+                            <i data-lucide="activity" class="w-5 h-5 text-splunk-pink"></i>
+                            APM Performance Curves (RPS vs. Latency P99)
+                        </h3>
+                        <p class="text-xs text-slate-400">Suivi en temps réel du débit applicatif EDF et de la courbe de latence</p>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="flex items-center gap-4 text-xs font-mono">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full bg-splunk-pink"></span>
+                            <span class="text-slate-300">Throughput (RPS)</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full bg-splunk-blue"></span>
+                            <span class="text-slate-300">Latence P99 (ms)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SVG Main Interactive Graph -->
+                <div class="relative h-64 w-full bg-splunk-bgDark rounded-xl border border-slate-800/80 p-3 overflow-hidden">
+                    
+                    <svg id="svg-apm-chart" class="w-full h-full" viewBox="0 0 800 200" preserveAspectRatio="none">
+                        <!-- Grid Lines -->
+                        <line x1="0" y1="40" x2="800" y2="40" class="chart-grid-line" />
+                        <line x1="0" y1="90" x2="800" y2="90" class="chart-grid-line" />
+                        <line x1="0" y1="140" x2="800" y2="140" class="chart-grid-line" />
+
+                        <!-- Area Gradients -->
+                        <defs>
+                            <linearGradient id="grad-pink" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="#E6007E" stop-opacity="0.35" />
+                                <stop offset="100%" stop-color="#E6007E" stop-opacity="0.0" />
+                            </linearGradient>
+                            <linearGradient id="grad-blue" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="#00A3E0" stop-opacity="0.3" />
+                                <stop offset="100%" stop-color="#00A3E0" stop-opacity="0.0" />
+                            </linearGradient>
+                        </defs>
+
+                        <!-- RPS Area & Path -->
+                        <path id="path-rps-area" d="M0,130 Q100,120 200,110 T400,125 T600,105 T800,120 L800,200 L0,200 Z" fill="url(#grad-pink)" />
+                        <path id="path-rps-line" d="M0,130 Q100,120 200,110 T400,125 T600,105 T800,120" fill="none" stroke="#E6007E" stroke-width="3" class="chart-path" />
+
+                        <!-- Latency Curve -->
+                        <path id="path-latency-line" d="M0,160 Q100,165 200,158 T400,162 T600,155 T800,160" fill="none" stroke="#00A3E0" stroke-width="3" class="chart-path" />
+
+                        <!-- Interactive Nodes on Graph -->
+                        <circle onclick="openGraphCallout('Point A: Pic de Charge', '4,950 RPS • Latence: 42ms')" cx="200" cy="110" r="6" fill="#E6007E" class="cursor-pointer hover:r-8 transition-all" />
+                        <circle onclick="openGraphCallout('Point B: Télémétrie Stable', '4,810 RPS • Latence: 38ms')" cx="400" cy="125" r="6" fill="#E6007E" class="cursor-pointer hover:r-8 transition-all" />
+                        <circle id="dot-scada-anomaly" onclick="openGraphCallout('Point C: Station SCADA', 'Peak Metrics')" cx="600" cy="105" r="6" fill="#00A3E0" class="cursor-pointer hover:r-8 transition-all" />
+                    </svg>
+
+                    <!-- Graph Overlay Time Labels -->
+                    <div class="absolute bottom-2 left-4 right-4 flex justify-between text-[10px] font-mono text-slate-500 pointer-events-none">
+                        <span>-60 min</span>
+                        <span>-45 min</span>
+                        <span>-30 min</span>
+                        <span>-15 min</span>
+                        <span>Maintenant</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. KUBERNETES & INFRASTRUCTURE RADIAL GAUGE RINGS + OT WAVEFORM -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <!-- K8s Node Gauge Ring Visualizers -->
+                <div class="splunk-card p-5 space-y-4">
+                    <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
+                        <h3 class="font-extrabold text-white text-sm flex items-center gap-2 font-mono">
+                            <i data-lucide="cpu" class="w-4 h-4 text-splunk-green"></i>
+                            K8s Cluster Node Gauges & Resource Rings
+                        </h3>
+                        <span class="text-xs font-mono text-slate-400">OpenShift EDF • 3 Nodes</span>
+                    </div>
+
+                    <!-- 3 Circular Gauges -->
+                    <div class="grid grid-cols-3 gap-2 text-center font-mono">
+                        
+                        <!-- Node 1 Gauge -->
+                        <div class="p-3 bg-splunk-bgDark rounded-xl border border-slate-800 flex flex-col items-center space-y-2">
+                            <span class="text-[11px] text-slate-300 font-bold truncate">k8s-edf-worker-01</span>
+                            <div class="relative w-20 h-20">
+                                <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                    <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path id="ring-cpu-1" class="text-splunk-green" stroke-dasharray="38, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                </svg>
+                                <div class="absolute inset-0 flex items-center justify-center text-xs font-bold text-white" id="val-ring-1">38%</div>
+                            </div>
+                            <span class="text-[10px] text-slate-400">CPU LOAD</span>
+                        </div>
+
+                        <!-- Node 2 Gauge (SCADA Gateway) -->
+                        <div class="p-3 bg-splunk-bgDark rounded-xl border border-slate-800 flex flex-col items-center space-y-2" id="card-gauge-scada">
+                            <span class="text-[11px] text-slate-300 font-bold truncate">scada-gw-prod-04</span>
+                            <div class="relative w-20 h-20">
+                                <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                    <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path id="ring-cpu-2" class="text-splunk-orange" stroke-dasharray="52, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                </svg>
+                                <div class="absolute inset-0 flex items-center justify-center text-xs font-bold text-white" id="val-ring-2">52%</div>
+                            </div>
+                            <span class="text-[10px] text-slate-400">OT/SCADA I/O</span>
+                        </div>
+
+                        <!-- Node 3 Gauge -->
+                        <div class="p-3 bg-splunk-bgDark rounded-xl border border-slate-800 flex flex-col items-center space-y-2">
+                            <span class="text-[11px] text-slate-300 font-bold truncate">db-postgres-01</span>
+                            <div class="relative w-20 h-20">
+                                <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                    <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path id="ring-cpu-3" class="text-splunk-blue" stroke-dasharray="24, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                </svg>
+                                <div class="absolute inset-0 flex items-center justify-center text-xs font-bold text-white" id="val-ring-3">24%</div>
+                            </div>
+                            <span class="text-[10px] text-slate-400">RAM ALLOCATED</span>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- OT / SCADA Waveform Signal Monitor -->
+                <div class="splunk-card p-5 space-y-4">
+                    <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
+                        <h3 class="font-extrabold text-white text-sm flex items-center gap-2 font-mono">
+                            <i data-lucide="radio" class="w-4 h-4 text-splunk-orange"></i>
+                            Signal Téléconduite SCADA / Waveform Telemetry
+                        </h3>
+                        <span id="scada-signal-status" class="bg-splunk-green/20 text-splunk-green border border-splunk-green/40 text-[10px] font-mono px-2 py-0.5 rounded font-bold">50 Hz STABLE</span>
+                    </div>
+
+                    <!-- Waveform Scope Canvas SVG -->
+                    <div class="h-32 bg-splunk-bgDark rounded-xl border border-slate-800 p-2 relative overflow-hidden flex items-center">
+                        <svg class="w-full h-full" viewBox="0 0 500 100" preserveAspectRatio="none">
+                            <path id="path-scada-wave" d="M0,50 Q25,10 50,50 T100,50 T150,50 T200,50 T250,50 T300,50 T350,50 T400,50 T450,50 T500,50" fill="none" stroke="#FF7900" stroke-width="2.5" class="chart-path" />
+                        </svg>
+                        <div class="absolute inset-x-0 bottom-1 flex justify-between px-3 text-[9px] font-mono text-slate-500">
+                            <span>Signal Réseau 400kV</span>
+                            <span>Fréquence: 50.02 Hz</span>
+                            <span>Déphasage: 0.01 rad</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 4. VISUAL SERVICE DEPENDENCY GRAPH & TRACE TIMELINE GANTT -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Service Topology Nodes -->
+                <div class="splunk-card p-5 lg:col-span-1 space-y-4">
+                    <div class="border-b border-slate-800 pb-3">
+                        <h3 class="font-extrabold text-white text-sm font-mono flex items-center gap-2">
+                            <i data-lucide="git-fork" class="w-4 h-4 text-splunk-pink"></i>
+                            Topology Flow Nodes
+                        </h3>
+                    </div>
+
+                    <div class="space-y-3 font-mono text-xs">
+                        <!-- Node A -->
+                        <div onclick="openGraphCallout('Service: API Gateway', 'Traffic: 4,820 RPS • Status: Green')" class="p-3 bg-splunk-bgDark rounded-xl border border-splunk-green flex justify-between items-center cursor-pointer hover:border-splunk-pink transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-splunk-green"></span>
+                                <span class="font-bold text-white">edf-api-gateway</span>
+                            </div>
+                            <span class="text-[11px] text-slate-400">12ms</span>
+                        </div>
+
+                        <!-- Node B -->
+                        <div id="card-topo-scada" onclick="openGraphCallout('Service: SCADA Ingest', 'Telemetry stream from nuclear sensors')" class="p-3 bg-splunk-bgDark rounded-xl border border-splunk-green flex justify-between items-center cursor-pointer hover:border-splunk-pink transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="dot-topo-scada" class="w-2.5 h-2.5 rounded-full bg-splunk-green"></span>
+                                <span class="font-bold text-white">grid-scada-telemetry</span>
+                            </div>
+                            <span id="txt-topo-scada-lat" class="text-[11px] text-slate-400">18ms</span>
+                        </div>
+
+                        <!-- Node C -->
+                        <div onclick="openGraphCallout('Service: Billing Database', 'Postgres Primary Cluster')" class="p-3 bg-splunk-bgDark rounded-xl border border-splunk-blue flex justify-between items-center cursor-pointer hover:border-splunk-pink transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-splunk-blue"></span>
+                                <span class="font-bold text-white">postgres-billing-db</span>
+                            </div>
+                            <span class="text-[11px] text-slate-400">6ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trace Waterfall Gantt Timeline Chart -->
+                <div class="splunk-card p-5 lg:col-span-2 space-y-4">
+                    <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-extrabold text-white text-sm font-mono flex items-center gap-2">
+                                <i data-lucide="layers" class="w-4 h-4 text-splunk-blue"></i>
+                                Distributed Trace Timeline Waterfall (Gantt Visual)
+                            </h3>
+                            <span class="text-xs text-slate-400 font-mono">Trace ID: <strong class="text-splunk-pink">edf-trace-8a92f-2026</strong></span>
+                        </div>
+                        <span id="trace-total-time" class="text-xs font-mono font-bold text-white bg-slate-800 px-2.5 py-1 rounded">38.4 ms TOTAL</span>
+                    </div>
+
+                    <!-- Gantt Visual Bars -->
+                    <div class="space-y-3 font-mono text-xs">
+                        
+                        <!-- Span 1 -->
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-white font-bold">1. POST /api/v2/telemetry/ingest</span>
+                                <span class="text-slate-400">38.4 ms</span>
+                            </div>
+                            <div class="w-full bg-splunk-bgDark h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
+                                <div class="bg-splunk-pink h-full w-[100%] rounded-full"></div>
+                            </div>
+                        </div>
+
+                        <!-- Span 2 -->
+                        <div class="space-y-1 pl-4 border-l border-slate-800">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-slate-200">2. gRPC GridTelemetry.InboundStream()</span>
+                                <span class="text-slate-400" id="txt-span-scada-time">18.2 ms</span>
+                            </div>
+                            <div class="w-full bg-splunk-bgDark h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
+                                <div id="bar-span-scada" class="bg-splunk-green h-full w-[50%] ml-[20%] rounded-full transition-all"></div>
+                            </div>
+                        </div>
+
+                        <!-- Span 3 -->
+                        <div class="space-y-1 pl-8 border-l border-slate-800">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-slate-300">3. SQL INSERT INTO telemetry_records</span>
+                                <span class="text-slate-400">6.1 ms</span>
+                            </div>
+                            <div class="w-full bg-splunk-bgDark h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
+                                <div class="bg-splunk-blue h-full w-[20%] ml-[75%] rounded-full"></div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+    <!-- CALLOUT INSPECTION MODAL -->
+    <div id="modal-callout" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="splunk-card p-6 max-w-md w-full space-y-4 border-2 border-splunk-pink">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="info" class="w-5 h-5 text-splunk-pink"></i>
+                    <h4 class="font-extrabold text-white text-base font-mono" id="modal-title">Inspection Graphique</h4>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+            
+            <p class="text-sm text-slate-300 font-mono" id="modal-desc">Détails des points de courbe sous inspection.</p>
+
+            <div class="p-3 bg-splunk-bgDark rounded-xl border border-slate-800 space-y-1 font-mono text-xs">
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Source:</span>
+                    <span class="text-white">EDF Observability Telemetry Engine</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Précision:</span>
+                    <span class="text-splunk-green">100ms Granularité</span>
+                </div>
+            </div>
+
+            <button onclick="closeModal()" class="w-full bg-splunk-pink hover:bg-splunk-pinkDark text-white font-bold font-mono text-xs py-2.5 rounded-xl transition-all">
+                Fermer l'Inspecteur
+            </button>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS CONTAINER -->
+    <div id="toast-container" class="fixed bottom-6 right-6 z-50 space-y-2 pointer-events-none"></div>
+
+    <!-- JAVASCRIPT GRAPH & INTERACTION LOGIC -->
+    <script>
+        let isChaos = false;
+
+        // Toggle Anomaly / Chaos Spikes in SVG Curves
+        function toggleChaosSpike() {
+            isChaos = !isChaos;
+
+            const btnText = document.getElementById('chaos-btn-text');
+            const pathRpsLine = document.getElementById('path-rps-line');
+            const pathRpsArea = document.getElementById('path-rps-area');
+            const pathLatencyLine = document.getElementById('path-latency-line');
+            const cardLatVal = document.getElementById('card-lat-val');
+            const cardErrVal = document.getElementById('card-err-val');
+            const cardLatStatus = document.getElementById('card-lat-status');
+            const cardLatencyContainer = document.getElementById('card-latency-container');
+            const cardErrorContainer = document.getElementById('card-error-container');
+            const ringCpu2 = document.getElementById('ring-cpu-2');
+            const valRing2 = document.getElementById('val-ring-2');
+            const scadaWave = document.getElementById('path-scada-wave');
+            const barSpanScada = document.getElementById('bar-span-scada');
+            const txtSpanScadaTime = document.getElementById('txt-span-scada-time');
+            const traceTotalTime = document.getElementById('trace-total-time');
+
+            if (isChaos) {
+                btnText.textContent = "Résoudre Anomalie Réseau";
+                
+                // Morph Paths to Spike State
+                pathRpsLine.setAttribute('d', 'M0,130 Q100,60 200,160 T400,50 T600,30 T800,140');
+                pathRpsArea.setAttribute('d', 'M0,130 Q100,60 200,160 T400,50 T600,30 T800,140 L800,200 L0,200 Z');
+                pathRpsLine.setAttribute('stroke', '#FF3B30');
+
+                pathLatencyLine.setAttribute('d', 'M0,160 Q100,100 200,140 T400,40 T600,20 T800,150');
+                pathLatencyLine.setAttribute('stroke', '#FF3B30');
+
+                // OT Waveform Distorted
+                scadaWave.setAttribute('d', 'M0,50 Q25,0 50,100 T100,10 T150,90 T200,20 T250,80 T300,10 T350,90 T400,20 T450,80 T500,50');
+                scadaWave.setAttribute('stroke', '#FF3B30');
+
+                // Card Metrics
+                cardLatVal.textContent = "380 ms";
+                cardLatVal.className = "text-3xl font-black font-mono text-splunk-red";
+
+                cardErrVal.textContent = "4.92%";
+                cardErrVal.className = "text-3xl font-black font-mono text-splunk-red";
+
+                cardLatStatus.textContent = "DÉPASSEMENT SLA (>50ms)";
+                cardLatStatus.className = "text-xs font-mono text-splunk-red font-bold";
+
+                cardLatencyContainer.className = "splunk-card p-4 space-y-2 border-l-4 border-l-splunk-red pulse-pink";
+                cardErrorContainer.className = "splunk-card p-4 space-y-2 border-l-4 border-l-splunk-red";
+
+                // K8s Gauge Ring 2
+                ringCpu2.setAttribute('stroke-dasharray', '88, 100');
+                ringCpu2.setAttribute('class', 'text-splunk-red');
+                valRing2.textContent = "88%";
+
+                // Trace Waterfall Span
+                barSpanScada.className = "bg-splunk-red h-full w-[85%] ml-[10%] rounded-full transition-all";
+                txtSpanScadaTime.textContent = "342.0 ms";
+                traceTotalTime.textContent = "380.4 ms DÉGRADÉ";
+                traceTotalTime.className = "text-xs font-mono font-bold text-splunk-red bg-red-950/80 px-2.5 py-1 rounded border border-red-500/40";
+
+                showToast('Anomalie Injectée', 'Alerte: Latence P99 SCADA > 350ms détectée dans l\'APM', 'error');
+            } else {
+                btnText.textContent = "Injecter Anomalie Réseau / Latence";
+
+                // Restore Normal Paths
+                pathRpsLine.setAttribute('d', 'M0,130 Q100,120 200,110 T400,125 T600,105 T800,120');
+                pathRpsArea.setAttribute('d', 'M0,130 Q100,120 200,110 T400,125 T600,105 T800,120 L800,200 L0,200 Z');
+                pathRpsLine.setAttribute('stroke', '#E6007E');
+
+                pathLatencyLine.setAttribute('d', 'M0,160 Q100,165 200,158 T400,162 T600,155 T800,160');
+                pathLatencyLine.setAttribute('stroke', '#00A3E0');
+
+                // Waveform Restored
+                scadaWave.setAttribute('d', 'M0,50 Q25,10 50,50 T100,50 T150,50 T200,50 T250,50 T300,50 T350,50 T400,50 T450,50 T500,50');
+                scadaWave.setAttribute('stroke', '#FF7900');
+
+                // Card Metrics Restored
+                cardLatVal.textContent = "38 ms";
+                cardLatVal.className = "text-3xl font-black font-mono text-white";
+
+                cardErrVal.textContent = "0.08%";
+                cardErrVal.className = "text-3xl font-black font-mono text-white";
+
+                cardLatStatus.textContent = "SLA OK (<50ms)";
+                cardLatStatus.className = "text-xs font-mono text-splunk-blue font-bold";
+
+                cardLatencyContainer.className = "splunk-card p-4 space-y-2 border-l-4 border-l-splunk-blue";
+                cardErrorContainer.className = "splunk-card p-4 space-y-2 border-l-4 border-l-splunk-green";
+
+                // K8s Gauge Ring 2
+                ringCpu2.setAttribute('stroke-dasharray', '52, 100');
+                ringCpu2.setAttribute('class', 'text-splunk-orange');
+                valRing2.textContent = "52%";
+
+                // Trace Waterfall Restored
+                barSpanScada.className = "bg-splunk-green h-full w-[50%] ml-[20%] rounded-full transition-all";
+                txtSpanScadaTime.textContent = "18.2 ms";
+                traceTotalTime.textContent = "38.4 ms TOTAL";
+                traceTotalTime.className = "text-xs font-mono font-bold text-white bg-slate-800 px-2.5 py-1 rounded";
+
+                showToast('Réseau Normalisé', 'Signal téléconduite SCADA rétabli aux valeurs nominales', 'success');
+            }
+        }
+
+        function openGraphCallout(title, desc) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-desc').textContent = desc;
+            document.getElementById('modal-callout').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-callout').classList.add('hidden');
+        }
+
+        function setTimeRange(range) {
+            ['1h', '6h', '24h'].forEach(r => {
+                const b = document.getElementById(`time-${r}`);
+                if (r === range) {
+                    b.className = "px-3 py-1 rounded-lg bg-splunk-pink text-white font-bold";
+                } else {
+                    b.className = "px-3 py-1 rounded-lg text-slate-400 hover:text-white";
+                }
+            });
+            showToast('Intervalle Modifié', `Fenêtre temporelle des courbes: ${range}`, 'info');
+        }
+
+        function switchEnvironment(env) {
+            showToast('Périmètre Mis à Jour', `Flux télémétrie basculé sur: ${env.toUpperCase()}`, 'info');
+        }
+
+        // Toast Engine
+        function showToast(title, msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+
+            let colorBorder = 'border-splunk-pink';
+            if (type === 'error') colorBorder = 'border-splunk-red';
+            if (type === 'success') colorBorder = 'border-splunk-green';
+
+            toast.className = `pointer-events-auto bg-splunk-panelBg border-l-4 ${colorBorder} border border-slate-700 text-white p-3.5 rounded-xl shadow-2xl space-y-1 max-w-sm font-sans text-xs flex items-start gap-3`;
+            toast.innerHTML = `
+                <div class="p-1.5 rounded-lg bg-splunk-bgDark text-splunk-pink shrink-0">
+                    <i data-lucide="activity" class="w-4 h-4"></i>
+                </div>
+                <div>
+                    <div class="font-bold text-white">${title}</div>
+                    <div class="text-slate-400">${msg}</div>
+                </div>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => { toast.remove(); }, 3500);
+        }
+
+        // Live Clock
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('live-timer').textContent = now.toTimeString().split(' ')[0];
+        }, 1000);
+
+        window.onload = function() {
+            lucide.createIcons();
+        };
+    </script>
+</body>
+</html>
